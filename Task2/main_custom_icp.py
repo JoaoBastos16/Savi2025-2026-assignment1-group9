@@ -75,14 +75,17 @@ def residual_function(params, src_pts, tgt_pts, tgt_normals=None, point_to_plane
     return residuals
 
 def custom_icp(source_pcd, target_pcd, init_params=None,
-               max_iterations=30, tolerance=1e-3, point_to_plane=True, 
-               voxel_size=0.05, distance_threshold=0.05):
+               max_iterations=50, tolerance=1e-3, point_to_plane=True, 
+               voxel_size=0.02, distance_threshold=0.05, visualize_iterations=True,
+               visualize_interval=5):
     """
     Implementação do ICP personalizado com least_squares.
     source_pcd, target_pcd : open3d.geometry.PointCloud
     init_params : vetor de 6 elementos (rx, ry, rz, tx, ty, tz)
     voxel_size : tamanho do voxel para downsampling (None para desabilitar)
     distance_threshold : distância máxima para considerar correspondência válida
+    visualize_iterations : se True, mostra visualizações intermediárias
+    visualize_interval : intervalo entre visualizações (ex: 5 = mostra a cada 5 iterações)
     """
     if init_params is None:
         init_params = np.zeros(6)
@@ -150,22 +153,44 @@ def custom_icp(source_pcd, target_pcd, init_params=None,
         delta = result.x - params
         params = result.x
         
-        # FIXED: Create visualization copies instead of modifying original
-        src_vis = o3d.geometry.PointCloud()
-        src_vis.points = o3d.utility.Vector3dVector(transform_points(src_points, params))
-        src_vis.paint_uniform_color([1, 0, 0])
+        # Visualize only at specified intervals or first/last iteration
+        should_visualize = (
+            visualize_iterations and 
+            (it == 0 or  # First iteration
+             (it + 1) % visualize_interval == 0 or  # Every N iterations
+             np.linalg.norm(delta) < tolerance)  # Last iteration (convergence)
+        )
         
-        tgt_vis = copy.deepcopy(target_pcd)
-        tgt_vis.paint_uniform_color([0, 1, 0])
-        
-        o3d.visualization.draw_geometries([src_vis, tgt_vis], 
-            window_name=f"ICP Customize – iteraction {it+1:02d} : medium error = {np.mean(np.abs(result.fun)):.6f}")
+        if should_visualize:
+            # Create visualization copies instead of modifying original
+            src_vis = o3d.geometry.PointCloud()
+            src_vis.points = o3d.utility.Vector3dVector(transform_points(src_points, params))
+            src_vis.paint_uniform_color([1, 0, 0])
+            
+            tgt_vis = copy.deepcopy(tgt_down)
+            tgt_vis.paint_uniform_color([0, 1, 0])
+            
+            o3d.visualization.draw_geometries([src_vis, tgt_vis], 
+                window_name=f"ICP Customize – iteration {it+1:02d} : mean error = {np.mean(np.abs(result.fun)):.6f}")
             
         print(f"Iteração {it+1:02d}: erro médio = {np.mean(np.abs(result.fun)):.6f}")
 
         # 3️⃣ Critério de paragem
         if np.linalg.norm(delta) < tolerance:
             print("Convergência atingida!")
+            
+            # Show final iteration if not already shown
+            if not should_visualize and visualize_iterations:
+                src_vis = o3d.geometry.PointCloud()
+                src_vis.points = o3d.utility.Vector3dVector(transform_points(src_points, params))
+                src_vis.paint_uniform_color([1, 0, 0])
+                
+                tgt_vis = copy.deepcopy(tgt_down)
+                tgt_vis.paint_uniform_color([0, 1, 0])
+                
+                o3d.visualization.draw_geometries([src_vis, tgt_vis], 
+                    window_name=f"ICP Customize – iteration {it+1:02d} (FINAL) : mean error = {np.mean(np.abs(result.fun)):.6f}")
+            
             break
 
     print("=== Fim do ICP ===")
@@ -240,8 +265,13 @@ def main():
     # distance_threshold: maximum distance for valid correspondence
     # - Smaller (0.02): stricter, removes more outliers
     # - Larger (0.1): more permissive, keeps more correspondences
+    # visualize_interval: show visualization every N iterations
+    # - 1: show every iteration
+    # - 5: show every 5th iteration (default)
+    # - Set visualize_iterations=False to disable intermediate visualization
     T_final = custom_icp(pcd_src, pcd_tgt, init_params, point_to_plane=True, 
-                        voxel_size=0.02, distance_threshold=0.05)
+                        voxel_size=0.02, distance_threshold=0.05,
+                        visualize_iterations=True, visualize_interval=5)
 
     # FIXED: Apply final transformation to a copy for visualization
     pcd_src_aligned = copy.deepcopy(pcd_src)
