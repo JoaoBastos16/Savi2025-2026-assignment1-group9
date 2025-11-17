@@ -11,3 +11,26 @@ After refinement
 <img width="1854" height="1048" alt="image" src="https://github.com/user-attachments/assets/a050e500-a4d7-4cf3-a5e5-32e718a65950" />
 
 ---
+
+
+Task 2
+---
+
+This script implements a fully customized 3D point-cloud registration pipeline using a least-squares formulation of the Iterative Closest Point (ICP) algorithm. The code constructs a manual optimization loop: each iteration computes nearest-neighbor correspondences, evaluates either point-to-point or point-to-plane residuals, and solves for the incremental 6-parameter rigid transformation using *scipy*’s **Levenberg–Marquardt** optimizer. The point clouds are generated from TUM RGB-D images, and normal vectors are used to enable point-to-plane minimization. Throughout the process, intermediate alignments and residual errors are visualized to monitor convergence. The final result is an estimated rigid transformation that successfully aligns the two RGB-D-derived point clouds, producing a refined geometric match after several optimization iterations. 
+
+Initial visualization
+<img width="1854" height="1048" alt="image" src="https://github.com/user-attachments/assets/21e7162b-fff1-4dea-a145-3e194d58e288" />
+
+
+Intermediate visualization 1
+<img width="1854" height="1048" alt="image" src="https://github.com/user-attachments/assets/5fcf2630-6627-47de-b181-d6df5d1d1dcf" />
+
+
+Intermediate visualization 2
+<img width="1854" height="1048" alt="image" src="https://github.com/user-attachments/assets/d82be703-a57a-45c5-b994-727933b93944" />
+
+
+Final visualization
+<img width="1854" height="1048" alt="image" src="https://github.com/user-attachments/assets/ee269deb-72c6-4ece-8b2a-4fd3e8c8824e" />
+
+---
