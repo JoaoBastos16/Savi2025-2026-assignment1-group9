@@ -46,4 +46,3 @@ Center: (-0.076548, -0.025306, 3.949090)
 Radius: 2.597471
 Volume: 73.407561 cubic units
 Surface Area: 84.783496 square units
----
