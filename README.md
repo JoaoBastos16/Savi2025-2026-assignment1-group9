@@ -2,9 +2,12 @@
 Task 1
 ---
 
-This script demonstrates a complete workflow for point cloud alignment using the Iterative Closest Point (ICP) algorithm in Open3D. It begins by loading a pair of sample point clouds and applying an initial transformation to provide a rough alignment. 
+This script demonstrates a complete workflow for point cloud alignment using the Iterative Closest Point (ICP) algorithm in Open3D. It begins by loading a pair of sample point clouds and applying an initial transformation to provide a rough alignment. The code then evaluates this initial guess before performing *point-to-plane ICP*, an optimization-based method that iteratively refines the transformation by minimizing geometric distance between corresponding points. The result is an improved alignment along with the final estimated transformation matrix, which is visualized before and after refinement.
+
+Before refinement
 <img width="1854" height="1048" alt="image" src="https://github.com/user-attachments/assets/689127c2-94f3-4ea2-a246-4f330bef1958" />
 
-The code then evaluates this initial guess before performing *point-to-plane ICP*, an optimization-based method that iteratively refines the transformation by minimizing geometric distance between corresponding points. The result is an improved alignment along with the final estimated transformation matrix, which is visualized before and after refinement. 
+After refinement
+<img width="1854" height="1048" alt="image" src="https://github.com/user-attachments/assets/a050e500-a4d7-4cf3-a5e5-32e718a65950" />
 
 ---
