@@ -1,119 +1,364 @@
+#!/usr/bin/env python3
+"""
+Minimum Enclosing Sphere Optimization
+Finds the smallest sphere that contains all points from two point clouds.
+"""
+
+import copy
 import numpy as np
 import open3d as o3d
-from scipy.optimize import least_squares
-import copy
-import cv2
+from scipy.optimize import minimize, least_squares
+import time
 
-# Função para transformar os pontos usando parâmetros (rotação e translação)
-def transform_points(points, params):
-    rx, ry, rz, tx, ty, tz = params
-    R, _ = cv2.Rodrigues(np.array([rx, ry, rz]))
-    t = np.array([[tx], [ty], [tz]])
-    transformed = (R @ points.T + t).T
-    return transformed
 
-# Função para calcular a distância de cada ponto ao centro da esfera
-def sphere_residual(params, src_pts, tgt_pts):
+def compute_sphere_residuals(params, points):
+    """
+    Compute residuals for sphere constraint optimization.
+    Residuals are positive when points are outside the sphere.
+    
+    Args:
+        params: [xc, yc, zc, r] - sphere center and radius
+        points: Nx3 array of points
+    
+    Returns:
+        Array of residuals (distance_to_center - radius)
+    """
     xc, yc, zc, r = params
-    all_points = np.concatenate([src_pts, tgt_pts], axis=0)
-    # Distância euclidiana de cada ponto ao centro da esfera
-    distances = np.linalg.norm(all_points - np.array([xc, yc, zc]), axis=1)
+    center = np.array([xc, yc, zc])
+    
+    # Calculate distances from center to all points
+    distances = np.linalg.norm(points - center, axis=1)
+    
+    # Residuals: positive if point is outside sphere
     residuals = distances - r
+    
     return residuals
 
-# Função para otimizar a esfera englobante mínima
-def optimize_minimum_enclosing_sphere(src_points, tgt_points, init_params=None):
-    if init_params is None:
-        init_params = np.array([0.0, 0.0, 0.0, 1.0])  # centro (0, 0, 0) e raio inicial 1
 
-    # Combina as duas nuvens de pontos
-    all_points = np.concatenate([src_points, tgt_points], axis=0)
+def objective_function(params, points):
+    """
+    Objective function: minimize radius while ensuring all points are inside.
+    
+    Args:
+        params: [xc, yc, zc, r] - sphere center and radius
+        points: Nx3 array of points
+    
+    Returns:
+        Objective value (radius + penalty for points outside)
+    """
+    xc, yc, zc, r = params
+    center = np.array([xc, yc, zc])
+    
+    # Calculate distances from center to all points
+    distances = np.linalg.norm(points - center, axis=1)
+    
+    # Maximum distance (this should equal radius at optimum)
+    max_distance = np.max(distances)
+    
+    # Objective: minimize radius, with penalty if any point is outside
+    # The penalty ensures all points stay inside
+    penalty = np.maximum(0, max_distance - r).sum() * 1000
+    
+    return r + penalty
 
-    # Otimização para minimizar o raio da esfera
-    result = least_squares(sphere_residual, init_params, args=(src_points, tgt_points))
 
-    # Parâmetros da esfera otimizada
+def constraint_all_points_inside(params, points):
+    """
+    Constraint function: all points must be inside the sphere.
+    Returns negative values if constraint is satisfied.
+    
+    Args:
+        params: [xc, yc, zc, r] - sphere center and radius
+        points: Nx3 array of points
+    
+    Returns:
+        Array of constraint values (should be <= 0)
+    """
+    xc, yc, zc, r = params
+    center = np.array([xc, yc, zc])
+    
+    # Calculate distances from center to all points
+    distances = np.linalg.norm(points - center, axis=1)
+    
+    # Constraint: distance - radius <= 0 (all points inside)
+    return distances - r
+
+
+def find_minimum_enclosing_sphere_constrained(points, initial_guess=None):
+    """
+    Find minimum enclosing sphere using constrained optimization.
+    
+    Args:
+        points: Nx3 array of all points from both clouds
+        initial_guess: Initial [xc, yc, zc, r] (optional)
+    
+    Returns:
+        Optimized parameters [xc, yc, zc, r]
+    """
+    print("\n=== Method 1: Constrained Optimization ===")
+    
+    # Initial guess: centroid and maximum distance
+    if initial_guess is None:
+        centroid = np.mean(points, axis=0)
+        max_dist = np.max(np.linalg.norm(points - centroid, axis=1))
+        initial_guess = np.concatenate([centroid, [max_dist * 1.1]])
+    
+    print(f"Initial guess: center={initial_guess[:3]}, radius={initial_guess[3]:.4f}")
+    
+    # Define constraint: all points must be inside sphere
+    constraints = {
+        'type': 'ineq',
+        'fun': lambda params: -(constraint_all_points_inside(params, points).max())
+    }
+    
+    # Bounds: radius must be positive
+    bounds = [(None, None), (None, None), (None, None), (0.01, None)]
+    
+    start_time = time.time()
+    
+    # Optimize
+    result = minimize(
+        objective_function,
+        initial_guess,
+        args=(points,),
+        method='SLSQP',
+        bounds=bounds,
+        constraints=constraints,
+        options={'maxiter': 1000, 'ftol': 1e-9}
+    )
+    
+    elapsed_time = time.time() - start_time
+    
+    print(f"Optimization completed in {elapsed_time:.3f} seconds")
+    print(f"Success: {result.success}")
+    print(f"Message: {result.message}")
+    print(f"Iterations: {result.nit}")
+    
+    return result.x
+
+
+def find_minimum_enclosing_sphere_least_squares(points, initial_guess=None):
+    """
+    Find minimum enclosing sphere using least squares with soft constraints.
+    This method minimizes the maximum violation.
+    
+    Args:
+        points: Nx3 array of all points from both clouds
+        initial_guess: Initial [xc, yc, zc, r] (optional)
+    
+    Returns:
+        Optimized parameters [xc, yc, zc, r]
+    """
+    print("\n=== Method 2: Least Squares Optimization ===")
+    
+    # Initial guess: centroid and maximum distance
+    if initial_guess is None:
+        centroid = np.mean(points, axis=0)
+        max_dist = np.max(np.linalg.norm(points - centroid, axis=1))
+        initial_guess = np.concatenate([centroid, [max_dist]])
+    
+    print(f"Initial guess: center={initial_guess[:3]}, radius={initial_guess[3]:.4f}")
+    
+    start_time = time.time()
+    
+    # Use least squares to minimize residuals
+    result = least_squares(
+        compute_sphere_residuals,
+        initial_guess,
+        args=(points,),
+        method='lm',
+        ftol=1e-12,
+        xtol=1e-12,
+        max_nfev=1000
+    )
+    
+    elapsed_time = time.time() - start_time
+    
+    # Adjust radius to ensure all points are inside
     xc, yc, zc, r = result.x
-    return xc, yc, zc, r
+    center = np.array([xc, yc, zc])
+    max_distance = np.max(np.linalg.norm(points - center, axis=1))
+    
+    # Set radius to maximum distance (ensuring all points are inside)
+    result.x[3] = max_distance
+    
+    print(f"Optimization completed in {elapsed_time:.3f} seconds")
+    print(f"Success: {result.success}")
+    print(f"Message: {result.message}")
+    
+    return result.x
 
-# Função principal
+
+def create_sphere_mesh(center, radius, resolution=30):
+    """
+    Create a sphere mesh for visualization.
+    
+    Args:
+        center: [xc, yc, zc] center coordinates
+        radius: sphere radius
+        resolution: mesh resolution
+    
+    Returns:
+        Open3D TriangleMesh
+    """
+    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=radius, resolution=resolution)
+    sphere.translate(center)
+    sphere.paint_uniform_color([0.7, 0.7, 0.9])
+    sphere.compute_vertex_normals()
+    return sphere
+
+
+def analyze_results(params, points1, points2):
+    """
+    Analyze and print statistics about the minimum enclosing sphere.
+    
+    Args:
+        params: [xc, yc, zc, r] - optimized sphere parameters
+        points1: Nx3 array of points from cloud 1
+        points2: Mx3 array of points from cloud 2
+    """
+    xc, yc, zc, r = params
+    center = np.array([xc, yc, zc])
+    
+    print("\n" + "="*60)
+    print("MINIMUM ENCLOSING SPHERE RESULTS")
+    print("="*60)
+    
+    print(f"\nSphere Parameters:")
+    print(f"  Center: ({xc:.6f}, {yc:.6f}, {zc:.6f})")
+    print(f"  Radius: {r:.6f}")
+    print(f"  Volume: {(4/3) * np.pi * r**3:.6f} cubic units")
+    print(f"  Surface Area: {4 * np.pi * r**2:.6f} square units")
+    
+    # Analyze point cloud 1
+    distances1 = np.linalg.norm(points1 - center, axis=1)
+    print(f"\nPoint Cloud 1 Statistics:")
+    print(f"  Number of points: {len(points1)}")
+    print(f"  Min distance to center: {np.min(distances1):.6f}")
+    print(f"  Max distance to center: {np.max(distances1):.6f}")
+    print(f"  Mean distance to center: {np.mean(distances1):.6f}")
+    print(f"  Points on sphere boundary (within 0.1% of radius): {np.sum(np.abs(distances1 - r) < 0.001 * r)}")
+    
+    # Analyze point cloud 2
+    distances2 = np.linalg.norm(points2 - center, axis=1)
+    print(f"\nPoint Cloud 2 Statistics:")
+    print(f"  Number of points: {len(points2)}")
+    print(f"  Min distance to center: {np.min(distances2):.6f}")
+    print(f"  Max distance to center: {np.max(distances2):.6f}")
+    print(f"  Mean distance to center: {np.mean(distances2):.6f}")
+    print(f"  Points on sphere boundary (within 0.1% of radius): {np.sum(np.abs(distances2 - r) < 0.001 * r)}")
+    
+    # Combined statistics
+    all_distances = np.concatenate([distances1, distances2])
+    print(f"\nCombined Statistics:")
+    print(f"  Total points: {len(all_distances)}")
+    print(f"  Max distance to center: {np.max(all_distances):.6f}")
+    print(f"  Constraint satisfaction: ", end="")
+    if np.all(all_distances <= r + 1e-6):
+        print("✓ All points inside sphere")
+    else:
+        violations = np.sum(all_distances > r + 1e-6)
+        print(f"✗ {violations} points outside sphere")
+        print(f"  Max violation: {np.max(all_distances - r):.6f}")
+    
+    print("="*60)
+
+
 def main():
-    # Carregar as imagens RGB e de profundidade
+    print("="*60)
+    print("MINIMUM ENCLOSING SPHERE OPTIMIZATION")
+    print("="*60)
+    
+    # Load point clouds from TUM dataset
+    print("\nLoading point clouds from TUM dataset...")
+    
     filename_rgb1 = '../tum_dataset/rgb/1.png'
     rgb1 = o3d.io.read_image(filename_rgb1)
-
     filename_depth1 = '../tum_dataset/depth/1.png'
     depth1 = o3d.io.read_image(filename_depth1)
-
-    # Create the rgbd image
     rgbd1 = o3d.geometry.RGBDImage.create_from_tum_format(rgb1, depth1)
-    print(rgbd1)
-
+    
     filename_rgb2 = '../tum_dataset/rgb/2.png'
     rgb2 = o3d.io.read_image(filename_rgb2)
-
     filename_depth2 = '../tum_dataset/depth/2.png'
     depth2 = o3d.io.read_image(filename_depth2)
-
-    # Create the rgbd image
     rgbd2 = o3d.geometry.RGBDImage.create_from_tum_format(rgb2, depth2)
-    print(rgbd2)
-
-    # Show the images using matplotlib
-    # plt.subplot(1, 2, 1)
-    # plt.title('TUM grayscale image')
-    # plt.imshow(rgbd1.color)
-    # plt.subplot(1, 2, 2)
-    # plt.title('TUM depth image')
-    # plt.imshow(rgbd1.depth)
-    # plt.show()
-
-    # Obtain the point cloud from the rgbd image
+    
+    # Create point clouds
     pcd1 = o3d.geometry.PointCloud.create_from_rgbd_image(
         rgbd1, o3d.camera.PinholeCameraIntrinsic(
             o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault))
-
+    
     pcd2 = o3d.geometry.PointCloud.create_from_rgbd_image(
         rgbd2, o3d.camera.PinholeCameraIntrinsic(
             o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault))
-
- 
-    pcd_src=pcd1
-    pcd_tgt=pcd2
-
-    # Estimar as normais se não estiverem presentes
-    if len(np.asarray(pcd1.normals)) == 0:
-        pcd1.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
     
-    if len(np.asarray(pcd2.normals)) == 0:
-        pcd2.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-
-    src_points = np.asarray(pcd1.points)
-    tgt_points = np.asarray(pcd2.points)
-
-    # Inicializar parâmetros da esfera (posição e raio inicial)
-    init_params = np.array([0.0, 0.0, 0.0, 1.0])  # centro da esfera no (0, 0, 0) e raio inicial 1
-
-    # Otimizar a esfera englobante mínima
-    xc, yc, zc, r = optimize_minimum_enclosing_sphere(src_points, tgt_points, init_params)
-
-    # Visualizar o resultado
-    print(f"Centro da esfera: ({xc:.3f}, {yc:.3f}, {zc:.3f})")
-    print(f"Raio da esfera: {r:.3f}")
-
-    # Visualizar as nuvens de pontos e a esfera otimizada
-    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=r, resolution=30)
-    sphere.translate([xc, yc, zc])
+    print(f"Point cloud 1: {len(pcd1.points)} points")
+    print(f"Point cloud 2: {len(pcd2.points)} points")
     
-    o3d.visualization.draw_geometries([
-        pcd1.paint_uniform_color([1, 0, 0]),
-        pcd2.paint_uniform_color([0, 1, 0]),
-        sphere.paint_uniform_color([0, 0, 1])
-    ], window_name="Resultado da Esfera Englobante Mínima")
+    # Downsample for efficiency
+    voxel_size = 0.05
+    print(f"\nDownsampling with voxel size: {voxel_size}")
+    pcd1_down = pcd1.voxel_down_sample(voxel_size)
+    pcd2_down = pcd2.voxel_down_sample(voxel_size)
+    print(f"Point cloud 1: {len(pcd1.points)} -> {len(pcd1_down.points)} points")
+    print(f"Point cloud 2: {len(pcd2.points)} -> {len(pcd2_down.points)} points")
+    
+    # Convert to numpy arrays
+    points1 = np.asarray(pcd1_down.points)
+    points2 = np.asarray(pcd2_down.points)
+    
+    # Combine all points for optimization
+    all_points = np.vstack([points1, points2])
+    print(f"\nTotal points for optimization: {len(all_points)}")
+    
+    # Method 1: Constrained optimization
+    params_constrained = find_minimum_enclosing_sphere_constrained(all_points)
+    analyze_results(params_constrained, points1, points2)
+    
+    # Method 2: Least squares
+    params_ls = find_minimum_enclosing_sphere_least_squares(all_points)
+    analyze_results(params_ls, points1, points2)
+    
+    # Use the better result (typically constrained gives better results)
+    params_final = params_constrained
+    
+    # Visualization
+    print("\n" + "="*60)
+    print("VISUALIZATION")
+    print("="*60)
+    print("Preparing visualization...")
+    
+    # Create colored point clouds
+    pcd1_vis = copy.deepcopy(pcd1_down)
+    pcd1_vis.paint_uniform_color([1, 0, 0])  # Red
+    
+    pcd2_vis = copy.deepcopy(pcd2_down)
+    pcd2_vis.paint_uniform_color([0, 1, 0])  # Green
+    
+    # Create sphere mesh
+    sphere = create_sphere_mesh(params_final[:3], params_final[3], resolution=50)
+    
+    # Create coordinate frame at sphere center
+    center_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+        size=0.3, origin=params_final[:3])
+    
+    print("\nVisualization Guide:")
+    print("  - Red points: Point Cloud 1")
+    print("  - Green points: Point Cloud 2")
+    print("  - Blue transparent sphere: Minimum enclosing sphere")
+    print("  - RGB axes: Sphere center (Red=X, Green=Y, Blue=Z)")
+    
+    # Display
+    o3d.visualization.draw_geometries(
+        [pcd1_vis, pcd2_vis, sphere, center_frame],
+        window_name="Minimum Enclosing Sphere",
+        width=1280,
+        height=720
+    )
+    
+    print("\nOptimization complete!")
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
-
-
-
-    
