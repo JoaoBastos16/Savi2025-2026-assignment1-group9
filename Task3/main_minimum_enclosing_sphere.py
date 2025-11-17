@@ -39,20 +39,20 @@ def optimize_minimum_enclosing_sphere(src_points, tgt_points, init_params=None):
 # Função principal
 def main():
     # Carregar as imagens RGB e de profundidade
-    filename_rgb1 = '/home/joao/savi_25-26/Parte08/tum_dataset/rgb/1.png'
+    filename_rgb1 = '../tum_dataset/rgb/1.png'
     rgb1 = o3d.io.read_image(filename_rgb1)
 
-    filename_depth1 = '/home/joao/savi_25-26/Parte08/tum_dataset/depth/1.png'
+    filename_depth1 = '../tum_dataset/depth/1.png'
     depth1 = o3d.io.read_image(filename_depth1)
 
     # Create the rgbd image
     rgbd1 = o3d.geometry.RGBDImage.create_from_tum_format(rgb1, depth1)
     print(rgbd1)
 
-    filename_rgb2 = '/home/joao/savi_25-26/Parte08/tum_dataset/rgb/2.png'
+    filename_rgb2 = '../tum_dataset/rgb/2.png'
     rgb2 = o3d.io.read_image(filename_rgb2)
 
-    filename_depth2 = '/home/joao/savi_25-26/Parte08/tum_dataset/depth/2.png'
+    filename_depth2 = '../tum_dataset/depth/2.png'
     depth2 = o3d.io.read_image(filename_depth2)
 
     # Create the rgbd image
