@@ -41,8 +41,25 @@ Task 3
 
 This script computes the **minimum enclosing sphere** that contains all points from two RGB-D–derived point clouds. After generating the point clouds from TUM dataset images and downsampling them for efficiency, the program applies optimization strategie: a **constrained SLSQP formulation**, which minimizes the radius while enforcing that every point lies inside the sphere. Method output sphere parameters, along with detailed geometric statistics. The final result is a sphere mesh visualized alongside the two point clouds, showing the smallest sphere capable of enclosing their combined geometry. 
 
-Minimum enclosing sphere results:
-Center: (-0.076548, -0.025306, 3.949090)
-Radius: 2.597471
+Initial sphere
+<img width="1308" height="786" alt="image" src="https://github.com/user-attachments/assets/392f77b3-a383-492a-adc6-83c3d7d515f7" />
+
+
+Intermediate sphere 1
+<img width="1308" height="786" alt="image" src="https://github.com/user-attachments/assets/f5619182-ada1-452d-adce-8e2617368225" />
+
+
+Intermediate sphere 2
+<img width="1308" height="786" alt="image" src="https://github.com/user-attachments/assets/8ce1db0d-6c23-4162-b160-0619409de1d3" />
+
+
+Intermediate sphere 3
+<img width="1308" height="786" alt="image" src="https://github.com/user-attachments/assets/4736852c-2919-4e36-9b9e-47e6d2a14a43" />
+
+
+
+Minimum enclosing sphere
+<img width="1308" height="786" alt="image" src="https://github.com/user-attachments/assets/dff41a10-bd4b-4449-8865-1130451c2337" />
+
 Volume: 73.407561 cubic units
 Surface Area: 84.783496 square units
