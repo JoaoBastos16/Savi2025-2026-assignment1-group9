@@ -60,6 +60,3 @@ Intermediate sphere 3
 
 Minimum enclosing sphere
 <img width="1308" height="786" alt="image" src="https://github.com/user-attachments/assets/dff41a10-bd4b-4449-8865-1130451c2337" />
-
-Volume: 73.407561 cubic units
-Surface Area: 84.783496 square units
