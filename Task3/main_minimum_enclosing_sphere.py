@@ -84,13 +84,15 @@ def constraint_all_points_inside(params, points):
     return distances - r
 
 
-def find_minimum_enclosing_sphere_constrained(points, initial_guess=None):
+def find_minimum_enclosing_sphere_constrained(points, initial_guess=None, pcd1=None, pcd2=None, visualize=True):
     """
     Find minimum enclosing sphere using constrained optimization.
     
     Args:
         points: Nx3 array of all points from both clouds
         initial_guess: Initial [xc, yc, zc, r] (optional)
+        pcd1, pcd2: Point clouds for visualization (optional)
+        visualize: Whether to show intermediate visualizations
     
     Returns:
         Optimized parameters [xc, yc, zc, r]
@@ -104,6 +106,21 @@ def find_minimum_enclosing_sphere_constrained(points, initial_guess=None):
         initial_guess = np.concatenate([centroid, [max_dist * 1.1]])
     
     print(f"Initial guess: center={initial_guess[:3]}, radius={initial_guess[3]:.4f}")
+    
+    # Visualize initial state
+    if visualize and pcd1 is not None and pcd2 is not None:
+        print("\n>>> Showing INITIAL sphere configuration...")
+        visualize_sphere_iteration(pcd1, pcd2, initial_guess, "Initial Sphere (Before Optimization)")
+    
+    # Store intermediate results for visualization
+    intermediate_params = []
+    iteration_count = [0]  # Use list to modify in callback
+    
+    def callback(xk):
+        """Callback function called at each iteration"""
+        iteration_count[0] += 1
+        if iteration_count[0] % 5 == 0:  # Store every 5th iteration
+            intermediate_params.append(xk.copy())
     
     # Define constraint: all points must be inside sphere
     constraints = {
@@ -124,7 +141,8 @@ def find_minimum_enclosing_sphere_constrained(points, initial_guess=None):
         method='SLSQP',
         bounds=bounds,
         constraints=constraints,
-        options={'maxiter': 1000, 'ftol': 1e-9}
+        callback=callback,
+        options={'maxiter': 1000, 'ftol': 1e-9, 'disp': False}
     )
     
     elapsed_time = time.time() - start_time
@@ -133,6 +151,15 @@ def find_minimum_enclosing_sphere_constrained(points, initial_guess=None):
     print(f"Success: {result.success}")
     print(f"Message: {result.message}")
     print(f"Iterations: {result.nit}")
+    
+    # Visualize intermediate states
+    if visualize and pcd1 is not None and pcd2 is not None and len(intermediate_params) > 0:
+        print(f"\n>>> Showing INTERMEDIATE sphere configurations ({len(intermediate_params)} states)...")
+        for i, params in enumerate(intermediate_params):
+            visualize_sphere_iteration(
+                pcd1, pcd2, params, 
+                f"Intermediate Sphere - Iteration {(i+1)*5} (radius={params[3]:.4f})"
+            )
     
     return result.x
 
@@ -189,23 +216,95 @@ def find_minimum_enclosing_sphere_least_squares(points, initial_guess=None):
     return result.x
 
 
-def create_sphere_mesh(center, radius, resolution=30):
+def create_sphere_wireframe(center, radius, color=[0.3, 0.5, 0.9], resolution=30):
     """
-    Create a sphere mesh for visualization.
+    Create a wireframe sphere for visualization (allows seeing points inside).
     
     Args:
         center: [xc, yc, zc] center coordinates
         radius: sphere radius
-        resolution: mesh resolution
+        color: RGB color [r, g, b]
+        resolution: number of latitude/longitude lines
     
     Returns:
-        Open3D TriangleMesh
+        Open3D LineSet representing the sphere wireframe
     """
-    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=radius, resolution=resolution)
-    sphere.translate(center)
-    sphere.paint_uniform_color([0.7, 0.7, 0.9])
-    sphere.compute_vertex_normals()
-    return sphere
+    # Create sphere mesh first
+    sphere_mesh = o3d.geometry.TriangleMesh.create_sphere(radius=radius, resolution=resolution)
+    sphere_mesh.translate(center)
+    
+    # Convert to wireframe (LineSet from triangle edges)
+    lines = o3d.geometry.LineSet.create_from_triangle_mesh(sphere_mesh)
+    lines.paint_uniform_color(color)
+    
+    return lines
+
+
+def create_sphere_point_cloud(center, radius, color=[0.3, 0.5, 0.9], num_points=5000):
+    """
+    Create a point cloud representation of sphere surface.
+    
+    Args:
+        center: [xc, yc, zc] center coordinates
+        radius: sphere radius
+        color: RGB color [r, g, b]
+        num_points: number of points on sphere surface
+    
+    Returns:
+        Open3D PointCloud representing the sphere surface
+    """
+    # Generate random points on sphere surface using spherical coordinates
+    phi = np.random.uniform(0, 2 * np.pi, num_points)
+    theta = np.random.uniform(0, np.pi, num_points)
+    
+    x = radius * np.sin(theta) * np.cos(phi) + center[0]
+    y = radius * np.sin(theta) * np.sin(phi) + center[1]
+    z = radius * np.cos(theta) + center[2]
+    
+    points = np.column_stack([x, y, z])
+    
+    sphere_pcd = o3d.geometry.PointCloud()
+    sphere_pcd.points = o3d.utility.Vector3dVector(points)
+    sphere_pcd.paint_uniform_color(color)
+    
+    return sphere_pcd
+
+
+def visualize_sphere_iteration(pcd1, pcd2, params, iteration_name="Iteration", use_wireframe=True):
+    """
+    Visualize point clouds with sphere at a specific iteration.
+    
+    Args:
+        pcd1, pcd2: Point clouds
+        params: [xc, yc, zc, r] sphere parameters
+        iteration_name: Name for the window title
+        use_wireframe: If True, use wireframe; if False, use point cloud representation
+    """
+    # Create colored point clouds
+    pcd1_vis = copy.deepcopy(pcd1)
+    pcd1_vis.paint_uniform_color([1, 0, 0])  # Red
+    
+    pcd2_vis = copy.deepcopy(pcd2)
+    pcd2_vis.paint_uniform_color([0, 1, 0])  # Green
+    
+    # Create sphere representation (wireframe or point cloud)
+    if use_wireframe:
+        sphere = create_sphere_wireframe(params[:3], params[3], color=[0.2, 0.4, 0.9], resolution=40)
+    else:
+        sphere = create_sphere_point_cloud(params[:3], params[3], color=[0.2, 0.4, 0.9], num_points=3000)
+    
+    # Create coordinate frame at sphere center
+    center_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+        size=0.3, origin=params[:3])
+    
+    # Display with draw_geometries
+    o3d.visualization.draw_geometries(
+        [pcd1_vis, pcd2_vis, sphere, center_frame],
+        window_name=iteration_name,
+        width=1280,
+        height=720,
+        point_show_normal=False
+    )
 
 
 def analyze_results(params, points1, points2):
@@ -312,8 +411,10 @@ def main():
     all_points = np.vstack([points1, points2])
     print(f"\nTotal points for optimization: {len(all_points)}")
     
-    # Method 1: Constrained optimization
-    params_constrained = find_minimum_enclosing_sphere_constrained(all_points)
+    # Method 1: Constrained optimization with visualization
+    params_constrained = find_minimum_enclosing_sphere_constrained(
+        all_points, pcd1=pcd1_down, pcd2=pcd2_down, visualize=True
+    )
     analyze_results(params_constrained, points1, points2)
     
     # Method 2: Least squares
@@ -325,38 +426,20 @@ def main():
     
     # Visualization
     print("\n" + "="*60)
-    print("VISUALIZATION")
+    print("FINAL VISUALIZATION")
     print("="*60)
-    print("Preparing visualization...")
+    print("Preparing final visualization with transparent sphere...")
     
-    # Create colored point clouds
-    pcd1_vis = copy.deepcopy(pcd1_down)
-    pcd1_vis.paint_uniform_color([1, 0, 0])  # Red
-    
-    pcd2_vis = copy.deepcopy(pcd2_down)
-    pcd2_vis.paint_uniform_color([0, 1, 0])  # Green
-    
-    # Create sphere mesh
-    sphere = create_sphere_mesh(params_final[:3], params_final[3], resolution=50)
-    
-    # Create coordinate frame at sphere center
-    center_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
-        size=0.3, origin=params_final[:3])
+    # Visualize final result
+    visualize_sphere_iteration(pcd1_down, pcd2_down, params_final, 
+                              f"FINAL Minimum Enclosing Sphere (radius={params_final[3]:.4f})")
     
     print("\nVisualization Guide:")
     print("  - Red points: Point Cloud 1")
     print("  - Green points: Point Cloud 2")
-    print("  - Blue transparent sphere: Minimum enclosing sphere")
+    print("  - Blue wireframe/points: Minimum enclosing sphere boundary")
     print("  - RGB axes: Sphere center (Red=X, Green=Y, Blue=Z)")
-    
-    # Display
-    o3d.visualization.draw_geometries(
-        [pcd1_vis, pcd2_vis, sphere, center_frame],
-        window_name="Minimum Enclosing Sphere",
-        width=1280,
-        height=720
-    )
-    
+    print("  - The sphere is shown as wireframe/points so you can see inside!")
     print("\nOptimization complete!")
 
 
